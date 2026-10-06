@@ -39,7 +39,7 @@ service cloud.firestore {
     }
     match /students/{id} {
       allow read: if approved();
-      allow create: if approved() && validStudent(request.resource.data);
+      allow create: if approved() && id.matches('^[A-Za-z0-9-]{1,80}$') && validStudent(request.resource.data);
       allow update, delete: if false;
     }
     function booleanOrNull(v, absent) {
