@@ -13,9 +13,10 @@ service cloud.firestore {
     }
     function validProfile(d) {
       return d.keys().hasAll(['name', 'email', 'status', 'createdAt']) &&
-        d.keys().hasOnly(['name', 'email', 'status', 'createdAt', 'updatedAt']) &&
+        d.keys().hasOnly(['name', 'email', 'status', 'createdAt', 'updatedAt', 'preferredClass']) &&
         d.name is string && d.name.size() > 0 && d.name.size() <= 80 &&
-        d.email is string && d.status in ['pending', 'approved', 'suspended'];
+        d.email is string && d.status in ['pending', 'approved', 'suspended'] &&
+        (!('preferredClass' in d) || d.preferredClass in ['ז׳1', 'ז׳2', 'ז׳3', 'ז׳4']);
     }
     match /teachers/{uid} {
       allow get: if verified() && (request.auth.uid == uid || admin());
@@ -25,9 +26,10 @@ service cloud.firestore {
         request.resource.data.email == request.auth.token.email &&
         request.resource.data.status == 'pending' &&
         request.resource.data.createdAt == request.time;
-      allow update: if admin() && validProfile(request.resource.data) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-        request.resource.data.updatedAt == request.time;
+      allow update: if verified() && validProfile(request.resource.data) &&
+        request.resource.data.updatedAt == request.time &&
+        ((admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+         (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferredClass', 'updatedAt'])));
       allow delete: if false;
     }
     function validStudent(d) {
