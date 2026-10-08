@@ -110,7 +110,10 @@ function toggle(id,i,v,label){let r=record(id);return `<button class="${r.values
 async function save(ids){
  if(!access||saving)return;
  if(!$('date').value||!subjectValue()||subjectValue().length>80||subjectValue().includes('/')){alert('יש למלא תאריך ומקצוע.');return}
- if(ids.some(id=>!record(id).absent&&record(id).values.some(v=>v===null))){alert('יש לסמן כן או לא בכל המדדים, או לסמן נעדר.');return}
+ const ready=ids.filter(id=>record(id).absent||record(id).values.every(v=>typeof v==='boolean'));
+ if(!ready.length){alert('עדיין אין הערכה מלאה לשמירה. יש להשלים את המדדים של לפחות תלמיד אחד, או לסמן היעדרות.');return}
+ if(ready.length<ids.length&&!confirm(`לא מולאו נתונים על כולם. האם להמשיך?\nיישמרו ${ready.length} מתוך ${ids.length} תלמידים. הערכות חלקיות יישארו להשלמה.`))return;
+ ids=ready;
  const user=auth.currentUser,session=generation,context=saveContext();saveFeedback=null;
  const entries=ids.map(id=>({key:key(id),data:{studentId:id,date:$('date').value,lesson:$('lesson').value,subject:subjectValue(),ownerUid:user.uid,teacher:profile.name,values:[...record(id).values],absent:record(id).absent,updatedAt:serverTimestamp()}}));
  if(entries.length>100){alert('אפשר לשמור עד 100 תלמידים בכל פעם.');return}
