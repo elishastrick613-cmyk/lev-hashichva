@@ -13,10 +13,19 @@ service cloud.firestore {
     }
     function validProfile(d) {
       return d.keys().hasAll(['name', 'email', 'status', 'createdAt']) &&
-        d.keys().hasOnly(['name', 'email', 'status', 'createdAt', 'updatedAt', 'preferredClass']) &&
+        d.keys().hasOnly(['name', 'email', 'status', 'createdAt', 'updatedAt', 'preferredClass', 'openLesson']) &&
         d.name is string && d.name.size() > 0 && d.name.size() <= 80 &&
         d.email is string && d.status in ['pending', 'approved', 'suspended'] &&
-        (!('preferredClass' in d) || d.preferredClass in ['ז׳1', 'ז׳2', 'ז׳3', 'ז׳4']);
+        (!('preferredClass' in d) || d.preferredClass in ['ז׳1', 'ז׳2', 'ז׳3', 'ז׳4']) &&
+        (!('openLesson' in d) || d.openLesson == null || validLessonContext(d.openLesson));
+    }
+    function validLessonContext(d) {
+      return d is map && d.keys().hasAll(['cls', 'date', 'lesson', 'subject']) &&
+        d.keys().hasOnly(['cls', 'date', 'lesson', 'subject']) &&
+        d.cls in ['ז׳1', 'ז׳2', 'ז׳3', 'ז׳4'] &&
+        d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        d.lesson in ['1','2','3','4','5','6','7','8'] &&
+        d.subject is string && d.subject.matches('^[^/]{1,80}$');
     }
     match /teachers/{uid} {
       allow get: if verified() && (request.auth.uid == uid || admin());
@@ -29,7 +38,7 @@ service cloud.firestore {
       allow update: if verified() && validProfile(request.resource.data) &&
         request.resource.data.updatedAt == request.time &&
         ((admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
-         (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferredClass', 'updatedAt'])));
+         (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferredClass', 'openLesson', 'updatedAt'])));
       allow delete: if false;
     }
     function validStudent(d) {
