@@ -45,7 +45,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     function booleanOrNull(v, absent) {
-      return v is bool || (absent && v == null);
+      return v is bool || v == null;
     }
     function validAssessment(d) {
       return d.keys().hasAll(['studentId', 'date', 'lesson', 'subject', 'ownerUid', 'teacher', 'values', 'absent', 'updatedAt']) &&
@@ -62,7 +62,12 @@ service cloud.firestore {
         booleanOrNull(d.values[0], d.absent) && booleanOrNull(d.values[1], d.absent) &&
         booleanOrNull(d.values[2], d.absent) &&
         (d.subject == 'תפילה' ||
-         (booleanOrNull(d.values[3], d.absent) && booleanOrNull(d.values[4], d.absent)));
+         (booleanOrNull(d.values[3], d.absent) && booleanOrNull(d.values[4], d.absent))) &&
+        (d.absent ||
+         (d.subject == 'תפילה' && d.values[0] is bool && d.values[1] is bool && d.values[2] is bool) ||
+         (d.subject != 'תפילה' &&
+          ((d.values[0] is bool && d.values[1] is bool) ||
+           (d.values[2] is bool && d.values[3] is bool && d.values[4] is bool))));
     }
     match /assessments/{id} {
       function validId(d) {

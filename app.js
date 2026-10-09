@@ -2,15 +2,15 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import { getAuth, onIdTokenChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, updateProfile, sendEmailVerification, sendPasswordResetEmail, reload, getIdToken } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, doc, collection, getDoc, setDoc, updateDoc, onSnapshot,
-  query, where, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+  query, where, writeBatch, serverTimestamp, runTransaction } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
 auth.languageCode='he';
 const ADMIN_EMAIL='elishastrick613@gmail.com';
-let access=false,profile=null,generation=0,saving=false,registerMode=false,saveFeedback=null,homeSaved=false;
-function saveContext(){return JSON.stringify([auth.currentUser?.uid,$('class').value,$('date').value,$('lesson').value,subjectValue()])}
-function saveStatus(){return saving?'שומר…':saveFeedback?.context===saveContext()?saveFeedback.text:''}
+let access=false,profile=null,generation=0,saving=false,registerMode=false,saveFeedback=null,homeSaved=false,lessonPhase='start';
+function saveContext(){return JSON.stringify([auth.currentUser?.uid,$('class').value,$('date').value,$('lesson').value,subjectValue(),lessonPhase])}
+function saveStatus(){return saving?(saveFeedback?.text||'שומר…'):saveFeedback?.context===saveContext()?saveFeedback.text:''}
 let ownSubscription=null,studentSubscription=null,recordSubscription=null,teacherSubscription=null;
 let studentsReady=false,recordsReady=false,weekKey='',teachers=[];
 function isAdmin(){return auth.currentUser?.emailVerified&&auth.currentUser.email===ADMIN_EMAIL}
@@ -100,56 +100,87 @@ document.getElementById('modeButton').onclick=()=>{registerMode=!registerMode;$(
 const metrics=['הגעה בזמן לשיעור','ספר ומחברת','עבודה רציפה','ביצוע מטלה','מוכנות לשיעור הבא'];
 const prayerMetrics=['הגעה בזמן','תפילה נאותה ומכובדת','שמירה על השקט'];
 function metricsFor(subject=subjectValue()){return subject==='תפילה'?prayerMetrics:metrics}
+function activeIndices(){return subjectValue()==='תפילה'?[0,1,2]:view==='personal'?[0,1,2,3,4]:lessonPhase==='start'?[0,1]:[2,3,4]}
+function phaseTitle(){return subjectValue()==='תפילה'?'תפילה':lessonPhase==='start'?'תחילת שיעור':'סוף שיעור'}
+function phaseReady(id){const r=record(id);return r.absent||activeIndices().every(i=>typeof r.values[i]==='boolean')}
+function changePhase(phase){if(saving||!['start','end'].includes(phase))return;lessonPhase=phase;render()}
+function phaseButtons(){return subjectValue()==='תפילה'?'':`<div class="report-actions phase-buttons"><button class="${lessonPhase==='start'?'primary':''}" aria-pressed="${lessonPhase==='start'}" onclick="changePhase('start')">תחילת שיעור</button><button class="${lessonPhase==='end'?'primary':''}" aria-pressed="${lessonPhase==='end'}" onclick="changePhase('end')">סוף שיעור</button></div>`}
 const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state={students:[],records:{}};
 let view='home',selected=state.students[0]?.id,drafts={};let localDate=new Date();localDate.setMinutes(localDate.getMinutes()-localDate.getTimezoneOffset());$('date').value=localDate.toISOString().slice(0,10);$('lesson').innerHTML=Array.from({length:8},(_,i)=>`<option>${i+1}</option>`).join('');
 function classOptions(){let old=$('class').value;$('class').innerHTML=[...new Set(['ז׳1','ז׳2','ז׳3','ז׳4',...state.students.map(s=>s.cls)])].map(c=>`<option>${esc(c)}</option>`).join('');if([...$('class').options].some(o=>o.value===old))$('class').value=old}classOptions();
 function subjectValue(){return $('subject').value==='other'?$('otherSubject').value.trim():$('subject').value}function changeSubject(){$('otherSubjectLabel').hidden=$('subject').value!=='other';render();if($('subject').value==='other')$('otherSubject').focus()}
-function roster(){return state.students.filter(s=>s.cls===$('class').value)}function key(id){return JSON.stringify([id,$('date').value,$('lesson').value,subjectValue(),auth.currentUser?.uid])}function record(id){let k=key(id);return drafts[k]||state.records[k]||{values:Array(metricsFor().length).fill(null),absent:false}}function changeClass(){selected=roster()[0]?.id;render()}function choose(id){selected=id;render()}function update(id,index,value){if(saving||!access)return;saveFeedback={context:saveContext(),text:'יש שינויים שטרם נשמרו'};$('appMessage').hidden=true;let k=key(id),r=record(id);drafts[k]={...r,values:[...r.values]};if(index==='absent')drafts[k].absent=value;else drafts[k].values[index]=value;render()}
+function roster(){return state.students.filter(s=>s.cls===$('class').value)}function key(id){return JSON.stringify([id,$('date').value,$('lesson').value,subjectValue(),auth.currentUser?.uid])}function record(id){let k=key(id);return drafts[k]||state.records[k]||{values:Array(metricsFor().length).fill(null),absent:false}}function changeClass(){selected=roster()[0]?.id;render()}function choose(id){selected=id;render()}function update(id,index,value){if(saving||!access)return;saveFeedback={context:saveContext(),text:'יש שינויים שטרם נשמרו'};$('appMessage').hidden=true;let k=key(id),r=record(id);drafts[k]={...r,values:[...r.values],dirty:[...new Set([...(drafts[k]?.dirty||[]),index])]};if(index==='absent')drafts[k].absent=value;else drafts[k].values[index]=value;render()}
 function toggle(id,i,v,label){let r=record(id);return `<button class="${r.values[i]===v?(v?'yes':'no'):''}" aria-pressed="${r.values[i]===v}" ${r.absent||saving?'disabled':''} onclick="update('${id}',${i},${v})">${label}</button>`}function attendance(id){let r=record(id);return `<button class="${r.absent?'active':''}" ${saving?'disabled':''} onclick="update('${id}','absent',${!r.absent})">${r.absent?'נעדר ✓':'סימון היעדרות'}</button>`}
 async function save(ids){
  if(!access||saving)return;
  if(!$('date').value||!subjectValue()||subjectValue().length>80||subjectValue().includes('/')){alert('יש למלא תאריך ומקצוע.');return}
- const ready=ids.filter(id=>record(id).absent||record(id).values.every(v=>typeof v==='boolean'));
+ const indices=activeIndices(),ready=ids.filter(phaseReady);
  if(!ready.length){alert('עדיין אין הערכה מלאה לשמירה. יש להשלים את המדדים של לפחות תלמיד אחד, או לסמן היעדרות.');return}
  if(ready.length<ids.length&&!confirm(`לא מולאו נתונים על כולם. האם להמשיך?\nיישמרו ${ready.length} מתוך ${ids.length} תלמידים. הערכות חלקיות יישארו להשלמה.`))return;
  ids=ready;
  const user=auth.currentUser,session=generation,context=saveContext();saveFeedback=null;
- const entries=ids.map(id=>({key:key(id),data:{studentId:id,date:$('date').value,lesson:$('lesson').value,subject:subjectValue(),ownerUid:user.uid,teacher:profile.name,values:[...record(id).values],absent:record(id).absent,updatedAt:serverTimestamp()}}));
+ const entries=ids.map(id=>({key:key(id),pendingDraft:drafts[key(id)],data:{studentId:id,date:$('date').value,lesson:$('lesson').value,subject:subjectValue(),ownerUid:user.uid,teacher:profile.name,values:[...record(id).values],absent:record(id).absent,updatedAt:serverTimestamp()}}));
  if(entries.length>100){alert('אפשר לשמור עד 100 תלמידים בכל פעם.');return}
  let committed=0;saving=true;render();
  try{
   // Keep each request below the security-rule document access limit, even without caching.
   for(let offset=0;offset<entries.length;offset+=5){
    if(session!==generation)return;
-   const group=entries.slice(offset,offset+5),batch=writeBatch(db);
-   for(const item of group){const id=await assessmentId(item.key);batch.set(doc(db,'assessments',id),item.data)}
-   await batch.commit();if(session!==generation)return;
-   committed+=group.length;for(const item of group)state.records[item.key]=item.data;
+   const group=entries.slice(offset,offset+5);
+   for(const item of group){
+    const ref=doc(db,'assessments',await assessmentId(item.key));
+    const saved=await runTransaction(db,async transaction=>{
+     const existing=await transaction.get(ref);
+     const previous=existing.exists()?existing.data():null;
+     const values=previous?[...previous.values]:Array(item.data.values.length).fill(null);
+     for(const i of indices)values[i]=item.data.values[i];
+     const data={...item.data,values};transaction.set(ref,data);return data;
+    });
+    if(session!==generation)return;
+    item.data=saved;state.records[item.key]=saved;committed++;
+   }
    saveFeedback={context,text:`שומר… ${committed} מתוך ${entries.length}`};render();
   }
-  for(const item of entries)delete drafts[item.key];
+  for(const item of entries){
+   const remaining=(item.pendingDraft?.dirty||[]).filter(i=>typeof i==='number'&&!indices.includes(i));
+   if(remaining.length){const values=[...item.data.values];for(const i of remaining)values[i]=item.pendingDraft.values[i];drafts[item.key]={...item.data,values,dirty:remaining}}else delete drafts[item.key];
+  }
   saveFeedback={context,text:entries.length===1?'ההערכה נשמרה ✓':entries.length+' הערכות נשמרו ✓'};homeSaved=true;view='home';render();showMessage('השמירה בוצעה בהצלחה')
  }
  catch(error){const partial=committed?`${committed} מתוך ${entries.length} הערכות נשמרו. יתר ההערכות טרם נשמרו. הבחירות נשארו במסך; לחץ שוב על שמירה כדי להשלים. `:'';saveFeedback={context,text:partial||'לא נשמר — נסה שוב'};showMessage(partial+friendly(error))}
  finally{saving=false;render()}
 }
-function render(){if(!access)return;$('lessonFilters').hidden=view==='home';$('nav').hidden=view==='home';$('pageToolbar').hidden=view==='home';syncWeek();if(!studentsReady||!recordsReady){$('content').innerHTML='<div class="panel empty">טוען נתונים…</div>';return}if(view==='admin'){renderAdmin();return}const metrics=metricsFor();let tabs=[['class','הכיתה שלי ודירוג'],['weekly','סיכום שבועי'],['grades','ציוני הכיתה']];if(isAdmin())tabs.push(['admin','אישור מורים']);$('nav').innerHTML=tabs.map(([v,t])=>`<button class="${view===v?'active':''}" onclick="goView('${v}')">${t}</button>`).join('');if(view==='grades'){renderGrades(roster());return}if(view==='home'){renderHome();return}if(view==='example'){exampleReport();return}let students=roster();if(!students.some(s=>s.id===selected))selected=students[0]?.id;let s=students.find(s=>s.id===selected);if(!s){$('content').innerHTML='<div class="panel empty">עדיין אין תלמידים בכיתה. מנהל השכבה יעדכן את הרשימה.</div>';return}if(view==='personal'){$('content').innerHTML=`<div class="student-layout"><aside class="panel students">${students.map(t=>`<button class="${t.id===selected?'active':''}" onclick="choose('${t.id}')">${esc(t.name)}</button>`).join('')}</aside><section class="panel"><div class="hero"><div><h2>${esc(s.name)}</h2><p>${esc(s.cls)} · הערכה לשיעור ${esc($('lesson').value)}</p></div>${attendance(s.id)}</div>${metrics.map((m,i)=>`<div class="metric"><span>${m}</span><div class="choices">${toggle(s.id,i,true,'כן')}${toggle(s.id,i,false,'לא')}</div></div>`).join('')}<div class="actions"><button class="primary" ${saving?'disabled':''} onclick="saveCurrentStudent()">שמירת ההערכה</button><span id="saved" class="muted">${saveStatus()||(state.records[key(s.id)]?'קיימת הערכה שלך לשיעור זה':'')}</span></div></section></div>`}else if(view==='class'){$('content').innerHTML=`<section class="panel"><h2>דירוג הכיתה · ${esc($('class').value)}</h2><p>התלמידים מסודרים לפי א׳–ב׳. סמן כן או לא בכל מדד, או סמן היעדרות.</p><p class="grading-progress">${students.filter(t=>record(t.id).absent||record(t.id).values.every(v=>typeof v==='boolean')).length} מתוך ${students.length} תלמידים מוכנים לשמירה</p><div class="mobile-class">${students.map(t=>`<article class="student-card"><div class="hero"><h3>${esc(t.name)}</h3>${attendance(t.id)}</div>${metrics.map((m,i)=>`<div class="metric"><span>${m}</span><div class="choices">${toggle(t.id,i,true,'כן')}${toggle(t.id,i,false,'לא')}</div></div>`).join('')}</article>`).join('')}</div><div class="scroll class-table"><table><thead><tr><th>תלמיד</th>${metrics.map(m=>`<th>${m}</th>`).join('')}<th>נוכחות</th></tr></thead><tbody>${students.map(t=>`<tr><td>${esc(t.name)}</td>${metrics.map((_,i)=>`<td>${toggle(t.id,i,true,'כן')}${toggle(t.id,i,false,'לא')}</td>`).join('')}<td>${attendance(t.id)}</td></tr>`).join('')}</tbody></table></div><div class="actions class-save-bar"><button class="primary" ${saving?'disabled':''} onclick="saveClass()">שמירת הערכות הכיתה</button><span id="saved" class="save-status" role="status" aria-live="polite">${saveStatus()}</span></div></section>`}else {weekly(students);$('content').innerHTML=reportActions()+$('content').innerHTML}}
+function render(){if(!access)return;for(const id of ['classFilterLabel','lessonFilterLabel','subjectFilterLabel'])$(id).hidden=view==='gradeLevel';$('otherSubjectLabel').hidden=view==='gradeLevel'||$('subject').value!=='other';for(const id of ['class','date','lesson','subject','otherSubject'])$(id).disabled=saving;$('lessonFilters').hidden=view==='home';$('nav').hidden=view==='home';$('pageToolbar').hidden=view==='home';syncWeek();if(!studentsReady||!recordsReady){$('content').innerHTML='<div class="panel empty">טוען נתונים…</div>';return}if(view==='admin'){renderAdmin();return}const metrics=metricsFor(),visibleMetrics=activeIndices().map(index=>({index,label:metrics[index]}));let tabs=[['class','הכיתה שלי ודירוג'],['weekly','סיכום שבועי'],['grades','ציוני הכיתה'],['gradeLevel','ציוני השכבה']];if(isAdmin())tabs.push(['admin','אישור מורים']);$('nav').innerHTML=tabs.map(([v,t])=>`<button class="${view===v?'active':''}" onclick="goView('${v}')">${t}</button>`).join('');if(view==='gradeLevel'){renderGradeLevel();return}if(view==='grades'){renderGrades(roster());return}if(view==='home'){renderHome();return}if(view==='example'){exampleReport();return}let students=roster();if(!students.some(s=>s.id===selected))selected=students[0]?.id;let s=students.find(s=>s.id===selected);if(!s){$('content').innerHTML='<div class="panel empty">עדיין אין תלמידים בכיתה. מנהל השכבה יעדכן את הרשימה.</div>';return}if(view==='personal'){$('content').innerHTML=`<div class="student-layout"><aside class="panel students">${students.map(t=>`<button class="${t.id===selected?'active':''}" onclick="choose('${t.id}')">${esc(t.name)}</button>`).join('')}</aside><section class="panel"><div class="hero"><div><h2>${esc(s.name)}</h2><p>${esc(s.cls)} · הערכה לשיעור ${esc($('lesson').value)}</p></div>${attendance(s.id)}</div>${metrics.map((m,i)=>`<div class="metric"><span>${m}</span><div class="choices">${toggle(s.id,i,true,'כן')}${toggle(s.id,i,false,'לא')}</div></div>`).join('')}<div class="actions"><button class="primary" ${saving?'disabled':''} onclick="saveCurrentStudent()">שמירת ההערכה</button><span id="saved" class="muted">${saveStatus()||(state.records[key(s.id)]?'קיימת הערכה שלך לשיעור זה':'')}</span></div></section></div>`}else if(view==='class'){$('content').innerHTML=`<section class="panel"><h2>דירוג הכיתה · ${esc($('class').value)} · ${phaseTitle()}</h2>${phaseButtons()}<p>סמן את מדדי ${phaseTitle()} ושמור. לסוף השיעור בחר את אותו תאריך, מספר שיעור ומקצוע. ניתן לשמור גם אם לא כל התלמידים מולאו.</p><p class="grading-progress">${students.filter(t=>phaseReady(t.id)).length} מתוך ${students.length} תלמידים מוכנים לשמירה</p><div class="mobile-class">${students.map(t=>`<article class="student-card"><div class="hero"><h3>${esc(t.name)}</h3>${attendance(t.id)}</div><p class="muted">${savedPhaseNote(t.id)}</p>${visibleMetrics.map(({label:m,index:i})=>`<div class="metric"><span>${m}</span><div class="choices">${toggle(t.id,i,true,'כן')}${toggle(t.id,i,false,'לא')}</div></div>`).join('')}</article>`).join('')}</div><div class="scroll class-table"><table><thead><tr><th>תלמיד</th>${visibleMetrics.map(({label:m})=>`<th>${m}</th>`).join('')}<th>נוכחות</th></tr></thead><tbody>${students.map(t=>`<tr><td>${esc(t.name)}</td>${visibleMetrics.map(({index:i})=>`<td>${toggle(t.id,i,true,'כן')}${toggle(t.id,i,false,'לא')}</td>`).join('')}<td>${attendance(t.id)}</td></tr>`).join('')}</tbody></table></div><div class="actions class-save-bar"><button class="primary" ${saving?'disabled':''} onclick="saveClass()">שמירת ${phaseTitle()}</button><span id="saved" class="save-status" role="status" aria-live="polite">${saveStatus()}</span></div></section>`}else {weekly(students);$('content').innerHTML=reportActions()+$('content').innerHTML}}
 function weekly(students){
 let date=new Date($('date').value+'T12:00:00');date.setDate(date.getDate()-date.getDay());let start=fmt(date);date.setDate(date.getDate()+6);let end=fmt(date);
 let records=Object.values(state.records).filter(r=>r.date>=start&&r.date<=end&&students.some(s=>s.id===r.studentId));
 let present=records.filter(r=>!r.absent),yes=present.reduce((n,r)=>n+r.values.filter(v=>v===true).length,0),total=present.reduce((n,r)=>n+r.values.filter(v=>typeof v==='boolean').length,0);
 function summary(title,labels,isPrayer){return `<section class="panel"><h2>${title}</h2><p>היעדרויות אינן נכללות באחוזים. השבוע הוא מיום ראשון עד שבת.</p><div class="scroll responsive-report"><table><thead><tr><th>תלמיד</th>${labels.map(m=>`<th>${m}</th>`).join('')}</tr></thead><tbody>${students.map(s=>{let rr=present.filter(r=>r.studentId===s.id&&(r.subject==='תפילה')===isPrayer);return `<tr><td>${esc(s.name)}</td>${labels.map((label,i)=>{let valid=rr.filter(r=>typeof r.values[i]==='boolean');let p=valid.length?Math.round(valid.filter(r=>r.values[i]===true).length/valid.length*100):null;return `<td data-label="${esc(label)}">${p===null?'אין נתונים':p+'%'}<div class="bar"><span style="width:${p||0}%"></span></div></td>`}).join('')}</tr>`}).join('')}</tbody></table></div></section>`}
-$('content').innerHTML=`<div class="cards"><div class="stat">שבוע נבחר<strong>${start.split('-').reverse().join('.')} — ${end.split('-').reverse().join('.')}</strong></div><div class="stat">הערכות ללא היעדרות<strong>${present.length}</strong></div><div class="stat">סימוני כן מכל המדדים<strong>${total?Math.round(yes/total*100)+'%':'—'}</strong></div></div>${summary('התקדמות בשיעורים',metrics,false)}${summary('התקדמות בתפילה',prayerMetrics,true)}<section class="panel"><h2>פירוט השיעורים והתפילות</h2><div class="scroll responsive-report"><table><thead><tr><th>תאריך</th><th>תלמיד</th><th>שיעור</th><th>מקצוע</th><th>מורה</th><th>תוצאות</th></tr></thead><tbody>${records.sort((a,b)=>b.date.localeCompare(a.date)||Number(a.lesson)-Number(b.lesson)).map(r=>`<tr><td data-label="תאריך">${esc(r.date)}</td><td data-label="תלמיד">${esc(students.find(s=>s.id===r.studentId)?.name||'')}</td><td data-label="שיעור">${esc(r.lesson)}</td><td data-label="מקצוע">${esc(r.subject)}</td><td data-label="מורה">${esc(r.teacher)}</td><td data-label="תוצאות">${r.absent?'נעדר':r.values.map((v,i)=>`${esc(metricsFor(r.subject)[i])}: ${v?'כן':'לא'}`).join(' · ')}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">טרם נשמרו הערכות בשבוע הזה.</td></tr>'}</tbody></table></div></section>`
+$('content').innerHTML=`<div class="cards"><div class="stat">שבוע נבחר<strong>${start.split('-').reverse().join('.')} — ${end.split('-').reverse().join('.')}</strong></div><div class="stat">הערכות ללא היעדרות<strong>${present.length}</strong></div><div class="stat">סימוני כן מכל המדדים<strong>${total?Math.round(yes/total*100)+'%':'—'}</strong></div></div>${summary('התקדמות בשיעורים',metrics,false)}${summary('התקדמות בתפילה',prayerMetrics,true)}<section class="panel"><h2>פירוט השיעורים והתפילות</h2><div class="scroll responsive-report"><table><thead><tr><th>תאריך</th><th>תלמיד</th><th>שיעור</th><th>מקצוע</th><th>מורה</th><th>תוצאות</th></tr></thead><tbody>${records.sort((a,b)=>b.date.localeCompare(a.date)||Number(a.lesson)-Number(b.lesson)).map(r=>`<tr><td data-label="תאריך">${esc(r.date)}</td><td data-label="תלמיד">${esc(students.find(s=>s.id===r.studentId)?.name||'')}</td><td data-label="שיעור">${esc(r.lesson)}</td><td data-label="מקצוע">${esc(r.subject)}</td><td data-label="מורה">${esc(r.teacher)}</td><td data-label="תוצאות">${r.absent?'נעדר':r.values.map((v,i)=>`${esc(metricsFor(r.subject)[i])}: ${v===true?'כן':v===false?'לא':'טרם מולא'}`).join(' · ')}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">טרם נשמרו הערכות בשבוע הזה.</td></tr>'}</tbody></table></div></section>`
 }function fmt(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 
 
 function renderHome(){
  const cls=profile?.preferredClass||$('class').value;$('class').value=cls;
  const count=state.students.filter(s=>s.cls===cls).length;
- $('content').innerHTML=`<div class="home-heading"><h2>שלום, ${esc(profile?.name||'')}</h2><p>לב השכבה · שכבה ז׳ תשפג״ז</p></div>${homeSaved?'<div class="home-success" role="status">✓ השמירה בוצעה בהצלחה</div>':''}<div class="home-dashboard"><section class="panel home-main"><h2>הכיתה שלי · ${esc(cls)}</h2><p>${count} תלמידים בכיתה</p><button class="primary home-start" onclick="enterMyClass()">הכיתה שלי ודירוג</button><button class="home-settings" onclick="openClassPreference()">שינוי הכיתה שלי</button></section><aside class="panel home-links"><h3>סיכומים</h3><button onclick="goView('weekly')">סיכום שבועי</button><button onclick="goView('grades')">ציוני הכיתה</button><button onclick="goView('example')">דוגמת פלט</button>${isAdmin()?'<button onclick="goView(\'admin\')">ניהול מורים ותלמידים</button>':''}</aside></div>`;
+ $('content').innerHTML=`<div class="home-heading"><h2>שלום, ${esc(profile?.name||'')}</h2><p>לב השכבה · שכבה ז׳ תשפג״ז</p></div>${homeSaved?'<div class="home-success" role="status">✓ השמירה בוצעה בהצלחה</div>':''}<div class="home-dashboard"><section class="panel home-main"><h2>הכיתה שלי · ${esc(cls)}</h2><p>${count} תלמידים בכיתה</p><button class="primary home-start" onclick="enterMyClass('start')">תחילת שיעור</button><button class="home-start" onclick="enterMyClass('end')">סוף שיעור</button><button class="home-settings" onclick="openClassPreference()">שינוי הכיתה שלי</button></section><aside class="panel home-links"><h3>סיכומים</h3><button onclick="goView('weekly')">סיכום שבועי</button><button onclick="goView('grades')">ציוני הכיתה</button><button onclick="goView('gradeLevel')">ציוני השכבה</button><button onclick="goView('example')">דוגמת פלט</button>${isAdmin()?'<button onclick="goView(\'admin\')">ניהול מורים ותלמידים</button>':''}</aside></div>`;
 }
-function enterMyClass(){$('class').value=profile?.preferredClass||$('class').value;selected=roster()[0]?.id;goView('class')}
+function enterMyClass(phase='start'){lessonPhase=phase;$('class').value=profile?.preferredClass||$('class').value;selected=roster()[0]?.id;goView('class')}
+
+function savedPhaseNote(id){
+ const r=state.records[key(id)];if(!r)return 'טרם נשמרו נתונים לשיעור הזה';if(r.absent)return 'נשמרה היעדרות';
+ if(subjectValue()==='תפילה')return 'הערכת התפילה נשמרה';
+ const start=[0,1].every(i=>typeof r.values[i]==='boolean'),end=[2,3,4].every(i=>typeof r.values[i]==='boolean');
+ return `${start?'תחילת שיעור נשמרה':'תחילת שיעור טרם נשמרה'} · ${end?'סוף שיעור נשמר':'סוף שיעור טרם נשמר'}`;
+}
+function renderGradeLevel(){
+ const date=new Date($('date').value+'T12:00:00');date.setDate(date.getDate()-date.getDay());const start=fmt(date);date.setDate(date.getDate()+6);const end=fmt(date);
+ const records=Object.values(state.records).filter(r=>!r.absent&&r.date>=start&&r.date<=end);
+ const score=rows=>{const values=rows.flatMap(r=>r.values).filter(v=>typeof v==='boolean');return values.length?Math.round(values.filter(v=>v).length/values.length*100)+'%':'—'};
+ const students=[...state.students].sort((a,b)=>a.cls.localeCompare(b.cls,'he')||a.name.localeCompare(b.name,'he'));
+ $('content').innerHTML=reportActions()+`<section class="panel"><h2>ציוני השכבה</h2><p>${start.split('-').reverse().join('.')}–${end.split('-').reverse().join('.')} · כל הכיתות · כל המורים</p><div class="scroll"><table class="grades-table"><thead><tr><th>כיתה</th><th>תלמיד</th><th>שיעורים</th><th>תפילה</th><th>ציון כולל</th></tr></thead><tbody>${students.map(s=>{const rows=records.filter(r=>r.studentId===s.id);return `<tr><td>${esc(s.cls)}</td><td>${esc(s.name)}</td><td>${score(rows.filter(r=>r.subject!=='תפילה'))}</td><td>${score(rows.filter(r=>r.subject==='תפילה'))}</td><td><strong>${score(rows)}</strong></td></tr>`}).join('')||'<tr><td colspan="5">אין תלמידים להצגה</td></tr>'}</tbody></table></div><p class="muted">הציונים הם אחוזי ״כן״ מתוך המדדים שמולאו. היעדרויות ומדדים שטרם מולאו אינם נכללים. — מציין שאין נתונים.</p></section>`;
+}
 
 
 function renderGrades(students){
@@ -165,10 +196,10 @@ function downloadReport(){
  if(!tables.length)return;
  const lines=[];
  const quote=value=>'"'+String(value).replace(/"/g,'""')+'"';
- lines.push([quote('לב השכבה'),quote($('class').value),quote($('date').value)].join(','));
+ lines.push([quote('לב השכבה'),quote(view==='gradeLevel'?'כל השכבה':$('class').value),quote($('date').value)].join(','));
  for(const table of tables){lines.push('');for(const row of table.rows){lines.push(Array.from(row.cells,cell=>quote(cell.innerText.trim())).join(','))}}
  const url=URL.createObjectURL(new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));
- const link=document.createElement('a');link.href=url;link.download=`ציוני-${$('class').value}-${$('date').value}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ const link=document.createElement('a');link.href=url;link.download=`ציוני-${view==='gradeLevel'?'כל-השכבה':$('class').value}-${$('date').value}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function reportActions(){return '<div class="report-actions"><button onclick="downloadReport()">הורדת הפלט לאקסל</button><button onclick="window.print()">הדפסה / שמירה כ־PDF</button></div>'}
 
@@ -200,10 +231,10 @@ $('content').innerHTML=`<div class="report-actions"><button onclick="window.prin
 }
 
 $('addform').onsubmit=async e=>{e.preventDefault();if(!access)return;let name=$('newname').value.trim(),cls=$('newclass').value;if(!name||!cls)return;const button=$('addform').querySelector('button[type=submit]');button.disabled=true;try{await setDoc(doc(collection(db,'students')),{name,cls,ownerUid:auth.currentUser.uid,createdAt:serverTimestamp()});$('add').close();$('addform').reset()}catch(error){showMessage(friendly(error))}finally{button.disabled=false}};
-Object.assign(window,{downloadReport,changeClass,choose,update,save,changeSubject,logout,authSubmit,resetPassword,sendVerification,refreshVerification,approveTeacher,goView,openClassPreference,saveClassPreference,openAddStudent,saveCurrentStudent,saveClass,openRosterImport,importRoster,enterMyClass});
+Object.assign(window,{changePhase,downloadReport,changeClass,choose,update,save,changeSubject,logout,authSubmit,resetPassword,sendVerification,refreshVerification,approveTeacher,goView,openClassPreference,saveClassPreference,openAddStudent,saveCurrentStudent,saveClass,openRosterImport,importRoster,enterMyClass});
 function saveCurrentStudent(){return save([selected])}
 function saveClass(){return save(roster().map(s=>s.id))}
-function goView(next){homeSaved=false;view=next;render()}
+function goView(next){if(saving)return;homeSaved=false;view=next;render()}
 onIdTokenChanged(auth,runSession);
 
 
