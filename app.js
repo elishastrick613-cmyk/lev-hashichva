@@ -191,7 +191,12 @@ function renderGradeLevel(){
  const date=new Date($('date').value+'T12:00:00');date.setDate(date.getDate()-date.getDay());const start=fmt(date);date.setDate(date.getDate()+6);const end=fmt(date);
  const records=Object.values(state.records).filter(r=>!r.absent&&r.date>=start&&r.date<=end);
  const score=rows=>{const values=rows.flatMap(r=>r.values).filter(v=>typeof v==='boolean');return values.length?Math.round(values.filter(v=>v).length/values.length*100)+'%':'—'};
- const students=[...state.students].sort((a,b)=>a.cls.localeCompare(b.cls,'he')||a.name.localeCompare(b.name,'he'));
+ const totals=new Map(state.students.map(s=>{const values=records.filter(r=>r.studentId===s.id).flatMap(r=>r.values).filter(v=>typeof v==='boolean');return [s.id,values.length?Math.round(values.filter(v=>v).length/values.length*100):null]}));
+ const students=[...state.students].sort((a,b)=>{
+  const first=totals.get(a.id),second=totals.get(b.id);
+  if(first===null&&second!==null)return 1;if(second===null&&first!==null)return -1;
+  return (second??0)-(first??0)||a.name.localeCompare(b.name,'he')||a.cls.localeCompare(b.cls,'he');
+ });
  $('content').innerHTML=reportActions()+`<section class="panel"><h2>ציוני השכבה</h2><p>${start.split('-').reverse().join('.')}–${end.split('-').reverse().join('.')} · כל הכיתות · כל המורים</p><div class="scroll"><table class="grades-table"><thead><tr><th>כיתה</th><th>תלמיד</th><th>שיעורים</th><th>תפילה</th><th>ציון כולל</th></tr></thead><tbody>${students.map(s=>{const rows=records.filter(r=>r.studentId===s.id);return `<tr><td>${esc(s.cls)}</td><td>${esc(s.name)}</td><td>${score(rows.filter(r=>r.subject!=='תפילה'))}</td><td>${score(rows.filter(r=>r.subject==='תפילה'))}</td><td><strong>${score(rows)}</strong></td></tr>`}).join('')||'<tr><td colspan="5">אין תלמידים להצגה</td></tr>'}</tbody></table></div><p class="muted">הציונים הם אחוזי ״כן״ מתוך המדדים שמולאו. היעדרויות ומדדים שטרם מולאו אינם נכללים. — מציין שאין נתונים.</p></section>`;
 }
 
