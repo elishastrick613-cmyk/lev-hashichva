@@ -187,17 +187,25 @@ function savedPhaseNote(id){
  const start=[0,1].every(i=>typeof r.values[i]==='boolean'),end=[2,3,4].every(i=>typeof r.values[i]==='boolean');
  return `${start?'תחילת שיעור נשמרה':'תחילת שיעור טרם נשמרה'} · ${end?'סוף שיעור נשמר':'סוף שיעור טרם נשמר'}`;
 }
+function weightedGrade(rows){
+ const rated=rows.filter(r=>!r.absent&&r.values.some(v=>typeof v==='boolean'));
+ const values=rated.flatMap(r=>r.values).filter(v=>typeof v==='boolean');
+ if(!values.length)return {raw:null,count:0,weighted:null};
+ const raw=values.filter(v=>v).length/values.length*100;
+ const count=new Set(rated.map(r=>JSON.stringify([r.date,r.lesson,r.subject,r.ownerUid]))).size;
+ return {raw,count,weighted:(raw*count+50*5)/(count+5)};
+}
 function renderGradeLevel(){
  const date=new Date($('date').value+'T12:00:00');date.setDate(date.getDate()-date.getDay());const start=fmt(date);date.setDate(date.getDate()+6);const end=fmt(date);
  const records=Object.values(state.records).filter(r=>!r.absent&&r.date>=start&&r.date<=end);
  const score=rows=>{const values=rows.flatMap(r=>r.values).filter(v=>typeof v==='boolean');return values.length?Math.round(values.filter(v=>v).length/values.length*100)+'%':'—'};
- const totals=new Map(state.students.map(s=>{const values=records.filter(r=>r.studentId===s.id).flatMap(r=>r.values).filter(v=>typeof v==='boolean');return [s.id,values.length?Math.round(values.filter(v=>v).length/values.length*100):null]}));
+ const totals=new Map(state.students.map(s=>[s.id,weightedGrade(records.filter(r=>r.studentId===s.id))]));
  const students=[...state.students].sort((a,b)=>{
-  const first=totals.get(a.id),second=totals.get(b.id);
+  const first=totals.get(a.id).weighted,second=totals.get(b.id).weighted;
   if(first===null&&second!==null)return 1;if(second===null&&first!==null)return -1;
   return (second??0)-(first??0)||a.name.localeCompare(b.name,'he')||a.cls.localeCompare(b.cls,'he');
  });
- $('content').innerHTML=reportActions()+`<section class="panel"><h2>ציוני השכבה</h2><p>${start.split('-').reverse().join('.')}–${end.split('-').reverse().join('.')} · כל הכיתות · כל המורים</p><div class="scroll"><table class="grades-table"><thead><tr><th>כיתה</th><th>תלמיד</th><th>שיעורים</th><th>תפילה</th><th>ציון כולל</th></tr></thead><tbody>${students.map(s=>{const rows=records.filter(r=>r.studentId===s.id);return `<tr><td>${esc(s.cls)}</td><td>${esc(s.name)}</td><td>${score(rows.filter(r=>r.subject!=='תפילה'))}</td><td>${score(rows.filter(r=>r.subject==='תפילה'))}</td><td><strong>${score(rows)}</strong></td></tr>`}).join('')||'<tr><td colspan="5">אין תלמידים להצגה</td></tr>'}</tbody></table></div><p class="muted">הציונים הם אחוזי ״כן״ מתוך המדדים שמולאו. היעדרויות ומדדים שטרם מולאו אינם נכללים. — מציין שאין נתונים.</p></section>`;
+ $('content').innerHTML=reportActions()+`<section class="panel"><h2>ציוני השכבה</h2><p>${start.split('-').reverse().join('.')}–${end.split('-').reverse().join('.')} · כל הכיתות · כל המורים</p><div class="scroll"><table class="grades-table"><thead><tr><th>כיתה</th><th>תלמיד</th><th>שיעורים</th><th>תפילה</th><th>אחוז מקורי</th><th>מספר הערכות</th><th aria-sort="descending">ציון משוקלל ↓</th></tr></thead><tbody>${students.map(s=>{const rows=records.filter(r=>r.studentId===s.id),total=totals.get(s.id);return `<tr><td>${esc(s.cls)}</td><td>${esc(s.name)}</td><td>${score(rows.filter(r=>r.subject!=='תפילה'))}</td><td>${score(rows.filter(r=>r.subject==='תפילה'))}</td><td>${total.raw===null?'—':Math.round(total.raw)+'%'}</td><td>${total.count}</td><td><strong>${total.weighted===null?'—':total.weighted.toFixed(1)}</strong></td></tr>`}).join('')||'<tr><td colspan="7">אין תלמידים להצגה</td></tr>'}</tbody></table></div><p class="muted">הדירוג משלב את האחוז המקורי עם כמות ההערכות. תחילת השיעור וסופו נחשבים כהערכה אחת לכל מורה, תאריך, שיעור ומקצוע. תפילה נחשבת כהערכה נפרדת. היעדרויות ומדדים שטרם מולאו אינם נכללים.</p><details><summary>איך מחושב הציון המשוקלל?</summary><p>הציון מחושב כך: (האחוז המקורי × מספר ההערכות + 50 × 5) ÷ (מספר ההערכות + 5). נקודת הבסיס היא 50 במשקל של 5 הערכות. ככל שיש יותר הערכות, הציון מתקרב יותר לאחוז המקורי. 100% בהערכה אחת נותנים 58.3; 80% בעשר הערכות נותנים 70. אין הערכות — אין ציון.</p></details></section>`;
 }
 
 
