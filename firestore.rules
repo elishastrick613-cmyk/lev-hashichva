@@ -89,6 +89,26 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['values', 'absent', 'updatedAt']);
       allow delete: if false;
     }
+    // Shared grocery lists: only holders of the random 192-bit home link.
+    match /shoppingHomes/{home}/items/{itemId} {
+      function homeAccess() {
+        return request.auth != null && home.matches('^[a-f0-9]{48}$');
+      }
+      function validShopping(d) {
+        return d.keys().hasAll(['id','name','category','quantity','note','urgent','bought','added_by','created']) &&
+          d.keys().hasOnly(['id','name','category','quantity','note','urgent','bought','added_by','created']) &&
+          d.id == itemId && itemId.matches('^[a-f0-9]{64}$') &&
+          d.name is string && d.name.size() > 0 && d.name.size() <= 100 &&
+          d.category is string && d.category.size() <= 40 &&
+          d.quantity is string && d.quantity.size() <= 30 &&
+          d.note is string && d.note.size() <= 200 &&
+          d.added_by is string && d.added_by.size() <= 40 &&
+          d.urgent in [0,1] && d.bought in [0,1] && d.created is int;
+      }
+      allow read: if homeAccess();
+      allow create, update: if homeAccess() && validShopping(request.resource.data);
+      allow delete: if homeAccess();
+    }
     match /{document=**} {
       allow read, write: if false;
     }
