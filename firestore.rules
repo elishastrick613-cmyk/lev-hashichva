@@ -96,14 +96,14 @@ service cloud.firestore {
       }
       function validShopping(d) {
         return d.keys().hasAll(['id','name','category','quantity','note','urgent','bought','added_by','created']) &&
-          d.keys().hasOnly(['id','name','category','quantity','note','urgent','bought','added_by','created']) &&
+          d.keys().hasOnly(['id','name','category','quantity','note','urgent','bought','added_by','created','trip']) &&
           d.id == itemId && itemId.matches('^[a-f0-9]{64}$') &&
           d.name is string && d.name.size() > 0 && d.name.size() <= 100 &&
           d.category is string && d.category.size() <= 40 &&
           d.quantity is string && d.quantity.size() <= 30 &&
           d.note is string && d.note.size() <= 200 &&
           d.added_by is string && d.added_by.size() <= 40 &&
-          d.urgent in [0,1] && d.bought in [0,1] && d.created is int;
+          d.urgent in [0,1] && d.bought in [0,1] && d.created is int && (!('trip' in d) || (d.trip is int && d.trip >= 0));
       }
       allow read: if homeAccess();
       allow create, update: if homeAccess() && validShopping(request.resource.data);
@@ -123,6 +123,13 @@ service cloud.firestore {
       allow read: if access();
       allow create: if access() && valid(request.resource.data);
       allow update, delete: if false;
+    }
+    match /shoppingHomes/{home}/session/{sessionId} {
+      function access() { return request.auth != null && home.matches('^[a-f0-9]{48}$') && sessionId == 'current'; }
+      function valid(d) { return d.keys().hasAll(['started','by']) && d.keys().hasOnly(['started','by']) && d.started is int && d.started >= 0 && d.by is string && d.by.size() <= 40; }
+      allow read: if access();
+      allow create, update: if access() && valid(request.resource.data);
+      allow delete: if false;
     }
     match /{document=**} {
       allow read, write: if false;
