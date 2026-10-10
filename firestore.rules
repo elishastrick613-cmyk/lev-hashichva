@@ -109,6 +109,21 @@ service cloud.firestore {
       allow create, update: if homeAccess() && validShopping(request.resource.data);
       allow delete: if homeAccess();
     }
+    match /shoppingHomes/{home}/lists/{listId} {
+      function access() { return request.auth != null && home.matches('^[a-f0-9]{48}$'); }
+      function valid(d) {
+        return d.keys().hasAll(['id','title','created','added_by','count','payload']) &&
+          d.keys().hasOnly(['id','title','created','added_by','count','payload']) &&
+          d.id == listId && listId.matches('^[a-f0-9-]{36}$') &&
+          d.title is string && d.title.size() > 0 && d.title.size() <= 80 &&
+          d.created is int && d.added_by is string && d.added_by.size() <= 40 &&
+          d.count is int && d.count > 0 && d.count <= 200 &&
+          d.payload is string && d.payload.size() > 0 && d.payload.size() <= 100000;
+      }
+      allow read: if access();
+      allow create: if access() && valid(request.resource.data);
+      allow update, delete: if false;
+    }
     match /{document=**} {
       allow read, write: if false;
     }
