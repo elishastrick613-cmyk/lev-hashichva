@@ -131,6 +131,19 @@ service cloud.firestore {
       allow create, update: if access() && valid(request.resource.data);
       allow delete: if false;
     }
+    match /classV2/{uid}/{kind}/{id} {
+      function owner() { return admin() && request.auth.uid == uid; }
+      allow read: if owner() && kind in ['lessons','grades'];
+      allow create, update: if owner() && kind in ['lessons','grades'] &&
+        request.resource.data.keys().hasOnly(['record','updatedAt']) &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.record.id == id &&
+        request.resource.data.record.subject in ['גמרא','פרשת שבוע'] &&
+        request.resource.data.record.date is string &&
+        request.resource.data.record.rows is list &&
+        request.resource.data.record.rows.size() == 31;
+      allow delete: if false;
+    }
     match /{document=**} {
       allow read, write: if false;
     }
