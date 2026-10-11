@@ -261,8 +261,9 @@ function saveClass(){return save(roster().map(s=>s.id))}
 function goView(next){if(saving)return;homeSaved=false;view=next;render()}
 function sessionChanged(user){
  // Firebase refreshes the token periodically. Preserve the active form and writes.
- if(user?.uid===activeSessionUid&&user.emailVerified===activeSessionVerified)return;
- activeSessionUid=user?.uid||null;activeSessionVerified=user?.emailVerified||false;
+ const uid=user?.uid||null,verified=user?.emailVerified||false;
+ if(uid===activeSessionUid&&verified===activeSessionVerified)return;
+ activeSessionUid=uid;activeSessionVerified=verified;
  return runSession(user);
 }
 let activeSessionUid,activeSessionVerified;
